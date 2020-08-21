@@ -257,24 +257,31 @@ public class ElasticsearchWriter {
       client.createIndices(Collections.singleton(index));
 
       if (!existingMappings.contains(index)) {
-        if (!ignoreSchema) {
+        boolean hasMapping = false;
+        try {
+          hasMapping = Mapping.getMapping(client, index, type) == null;
+        } catch (IOException e) {
+          throw new ConnectException("Failed to check mapping for index " + index);
+        }
+
+        if (!ignoreSchema && !hasMapping) {
           try {
-            if (Mapping.getMapping(client, index, type) == null) {
-              Mapping.createMapping(client, index, type, sinkRecord.valueSchema());
-            }
+            Mapping.createMapping(client, index, type, sinkRecord.valueSchema());
           } catch (IOException e) {
             // FIXME: concurrent tasks could attempt to create the mapping and one of the requests may
             // fail
             throw new ConnectException("Failed to initialize mapping for index: " + index, e);
           }
           existingMappings.add(index);
-        } else {
+        } else if (ignoreSchema && !hasMapping) {
           log.warn(
               "Index {} is missing a mapping and {}=true, so a mapping cannot be automatically"
                   + " created. It is recommended to manually add the mapping to this index.",
               index,
               SCHEMA_IGNORE_CONFIG
           );
+        } else if (hasMapping){
+          existingMappings.add(index);
         }
       }
 
