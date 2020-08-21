@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import static io.confluent.connect.elasticsearch.DataConverter.BehaviorOnNullValues;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG;
 import static io.confluent.connect.elasticsearch.bulk.BulkProcessor.BehaviorOnMalformedDoc;
 
 public class ElasticsearchWriter {
@@ -255,17 +256,26 @@ public class ElasticsearchWriter {
 
       client.createIndices(Collections.singleton(index));
 
-      if (!ignoreSchema && !existingMappings.contains(index)) {
-        try {
-          if (Mapping.getMapping(client, index, type) == null) {
-            Mapping.createMapping(client, index, type, sinkRecord.valueSchema());
+      if (!existingMappings.contains(index)) {
+        if (!ignoreSchema) {
+          try {
+            if (Mapping.getMapping(client, index, type) == null) {
+              Mapping.createMapping(client, index, type, sinkRecord.valueSchema());
+            }
+          } catch (IOException e) {
+            // FIXME: concurrent tasks could attempt to create the mapping and one of the requests may
+            // fail
+            throw new ConnectException("Failed to initialize mapping for index: " + index, e);
           }
-        } catch (IOException e) {
-          // FIXME: concurrent tasks could attempt to create the mapping and one of the requests may
-          // fail
-          throw new ConnectException("Failed to initialize mapping for index: " + index, e);
+          existingMappings.add(index);
+        } else {
+          log.warn(
+              "Index {} is missing a mapping and {}=true, so a mapping cannot be automatically"
+                  + " created. It is recommended to manually add the mapping to this index.",
+              index,
+              SCHEMA_IGNORE_CONFIG
+          );
         }
-        existingMappings.add(index);
       }
 
       tryWriteRecord(sinkRecord, index, ignoreKey, ignoreSchema);
