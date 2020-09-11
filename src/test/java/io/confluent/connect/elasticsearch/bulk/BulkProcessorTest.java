@@ -15,6 +15,9 @@
  **/
 package io.confluent.connect.elasticsearch.bulk;
 
+import io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig;
+import java.util.HashMap;
+import java.util.Map;
 import org.apache.kafka.common.utils.Time;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.junit.After;
@@ -29,6 +32,15 @@ import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ExecutionException;
 
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.BATCH_SIZE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.BEHAVIOR_ON_MALFORMED_DOCS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.CONNECTION_URL_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.LINGER_MS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_BUFFERED_RECORDS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.TYPE_NAME_CONFIG;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.assertEquals;
@@ -91,10 +103,21 @@ public class BulkProcessorTest {
   }
 
   Client client;
+  private Map<String, String> props;
 
   @Before
   public void createClient() {
     client = new Client();
+    props = new HashMap<>();
+    props.put(MAX_BUFFERED_RECORDS_CONFIG, "100");
+    props.put(MAX_IN_FLIGHT_REQUESTS_CONFIG, "5");
+    props.put(BATCH_SIZE_CONFIG, "2");
+    props.put(LINGER_MS_CONFIG, "5");
+    props.put(MAX_RETRIES_CONFIG, "3");
+    props.put(RETRY_BACKOFF_MS_CONFIG, "1");
+    props.put(BEHAVIOR_ON_MALFORMED_DOCS_CONFIG, BehaviorOnMalformedDoc.DEFAULT.name());
+    props.put(TYPE_NAME_CONFIG, "dummy");
+    props.put(CONNECTION_URL_CONFIG, "dummy");
   }
 
   @After
@@ -104,24 +127,14 @@ public class BulkProcessorTest {
 
   @Test
   public void batchingAndLingering() throws InterruptedException, ExecutionException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 5;
-    final int lingerMs = 5;
-    final int maxRetries = 0;
-    final int retryBackoffMs = 0;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
+    props.put(BATCH_SIZE_CONFIG, "5");
+    props.put(MAX_RETRIES_CONFIG, "0");
+    props.put(RETRY_BACKOFF_MS_CONFIG, "0");
 
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -148,24 +161,15 @@ public class BulkProcessorTest {
 
   @Test
   public void flushing() {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 5;
-    final int lingerMs = 100000; // super high on purpose to make sure flush is what's causing the request
-    final int maxRetries = 0;
-    final int retryBackoffMs = 0;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
+    props.put(BATCH_SIZE_CONFIG, "5");
+    props.put(LINGER_MS_CONFIG, "100000"); // super high on purpose to make sure flush is what's causing the request
+    props.put(MAX_RETRIES_CONFIG, "0");
+    props.put(RETRY_BACKOFF_MS_CONFIG, "0");
 
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     client.expect(Arrays.asList(1, 2, 3), BulkResponse.success());
@@ -185,24 +189,17 @@ public class BulkProcessorTest {
 
   @Test
   public void addBlocksWhenBufferFull() {
-    final int maxBufferedRecords = 1;
-    final int maxInFlightBatches = 1;
-    final int batchSize = 1;
-    final int lingerMs = 10;
-    final int maxRetries = 0;
-    final int retryBackoffMs = 0;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
+    props.put(MAX_BUFFERED_RECORDS_CONFIG, "1");
+    props.put(MAX_IN_FLIGHT_REQUESTS_CONFIG, "1");
+    props.put(BATCH_SIZE_CONFIG, "1");
+    props.put(LINGER_MS_CONFIG, "10");
+    props.put(MAX_RETRIES_CONFIG, "0");
+    props.put(RETRY_BACKOFF_MS_CONFIG, "0");
 
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -218,14 +215,6 @@ public class BulkProcessorTest {
 
   @Test
   public void retriableErrors() throws InterruptedException, ExecutionException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
-
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(true, "a retiable error"));
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(true, "a retriable error again"));
     client.expect(Arrays.asList(42, 43), BulkResponse.success());
@@ -233,13 +222,7 @@ public class BulkProcessorTest {
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -250,15 +233,9 @@ public class BulkProcessorTest {
   }
 
   @Test
-  public void retriableErrorsHitMaxRetries() throws InterruptedException, ExecutionException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 2;
-    final int retryBackoffMs = 1;
+  public void retriableErrorsHitMaxRetries() throws InterruptedException {
+    props.put(MAX_RETRIES_CONFIG, "2");
     final String errorInfo = "a final retriable error again";
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
 
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(true, "a retiable error"));
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(true, "a retriable error again"));
@@ -267,13 +244,7 @@ public class BulkProcessorTest {
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -290,27 +261,13 @@ public class BulkProcessorTest {
 
   @Test
   public void unretriableErrors() throws InterruptedException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
-
     final String errorInfo = "an unretriable error";
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(false, errorInfo));
 
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -326,14 +283,8 @@ public class BulkProcessorTest {
   }
 
   @Test
-  public void failOnMalformedDoc() throws InterruptedException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.FAIL;
+  public void failOnMalformedDoc() {
+    props.put(BEHAVIOR_ON_MALFORMED_DOCS_CONFIG, BehaviorOnMalformedDoc.FAIL.name());
 
     final String errorInfo = " [{\"type\":\"mapper_parsing_exception\",\"reason\":\"failed to parse\"," +
         "\"caused_by\":{\"type\":\"illegal_argument_exception\",\"reason\":\"object\n" +
@@ -343,13 +294,7 @@ public class BulkProcessorTest {
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
         Time.SYSTEM,
         client,
-        maxBufferedRecords,
-        maxInFlightBatches,
-        batchSize,
-        lingerMs,
-        maxRetries,
-        retryBackoffMs,
-        behaviorOnMalformedDoc
+        new ElasticsearchSinkConnectorConfig(props)
     );
 
     bulkProcessor.start();
@@ -368,14 +313,7 @@ public class BulkProcessorTest {
   }
 
   @Test
-  public void ignoreOrWarnOnMalformedDoc() throws InterruptedException {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-
+  public void ignoreOrWarnOnMalformedDoc() {
     // Test both IGNORE and WARN options
     // There is no difference in logic between IGNORE and WARN, except for the logging.
     // Test to ensure they both work the same logically
@@ -390,17 +328,11 @@ public class BulkProcessorTest {
           "\"caused_by\":{\"type\":\"illegal_argument_exception\",\"reason\":\"object\n" +
           " field starting or ending with a [.] makes object resolution ambiguous: [avjpz{{.}}wjzse{{..}}gal9d]\"}}]";
       client.expect(Arrays.asList(42, 43), BulkResponse.failure(false, errorInfo));
-
+      props.put(BEHAVIOR_ON_MALFORMED_DOCS_CONFIG, behaviorOnMalformedDoc.name());
       final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
           Time.SYSTEM,
           client,
-          maxBufferedRecords,
-          maxInFlightBatches,
-          batchSize,
-          lingerMs,
-          maxRetries,
-          retryBackoffMs,
-          behaviorOnMalformedDoc
+          new ElasticsearchSinkConnectorConfig(props)
       );
 
       bulkProcessor.start();
@@ -419,27 +351,13 @@ public class BulkProcessorTest {
 
   @Test
   public void farmerTaskPropogatesException() {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
-
     final String errorInfo = "an unretriable error";
     client.expect(Arrays.asList(42, 43), BulkResponse.failure(false, errorInfo));
 
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
             Time.SYSTEM,
             client,
-            maxBufferedRecords,
-            maxInFlightBatches,
-            batchSize,
-            lingerMs,
-            maxRetries,
-            retryBackoffMs,
-            behaviorOnMalformedDoc
+            new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;
@@ -453,15 +371,7 @@ public class BulkProcessorTest {
   }
 
   @Test
-  public void terminateRetriesWhenInterruptedInSleep() throws Exception {
-    final int maxBufferedRecords = 100;
-    final int maxInFlightBatches = 5;
-    final int batchSize = 2;
-    final int lingerMs = 5;
-    final int maxRetries = 3;
-    final int retryBackoffMs = 1;
-    final BehaviorOnMalformedDoc behaviorOnMalformedDoc = BehaviorOnMalformedDoc.DEFAULT;
-
+  public void terminateRetriesWhenInterruptedInSleep() {
     Time mockTime = mock(Time.class);
     doAnswer(invocation -> {
       Thread.currentThread().interrupt();
@@ -473,13 +383,7 @@ public class BulkProcessorTest {
     final BulkProcessor<Integer, ?> bulkProcessor = new BulkProcessor<>(
             mockTime,
             client,
-            maxBufferedRecords,
-            maxInFlightBatches,
-            batchSize,
-            lingerMs,
-            maxRetries,
-            retryBackoffMs,
-            behaviorOnMalformedDoc
+            new ElasticsearchSinkConnectorConfig(props)
     );
 
     final int addTimeoutMs = 10;

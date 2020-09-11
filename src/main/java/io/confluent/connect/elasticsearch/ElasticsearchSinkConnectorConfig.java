@@ -16,6 +16,8 @@
 
 package io.confluent.connect.elasticsearch;
 
+import java.util.HashSet;
+import java.util.Set;
 import org.apache.kafka.common.config.AbstractConfig;
 import org.apache.kafka.common.config.ConfigDef;
 import org.apache.kafka.common.config.ConfigDef.Importance;
@@ -406,6 +408,74 @@ public class ElasticsearchSinkConnectorConfig extends AbstractConfig {
 
   public ElasticsearchSinkConnectorConfig(Map<String, String> props) {
     super(CONFIG, props);
+  }
+
+  public int batchSize() {
+    return getInt(BATCH_SIZE_CONFIG);
+  }
+
+  public BehaviorOnMalformedDoc behaviorOnMalformedDoc() {
+    return BehaviorOnMalformedDoc.forValue(getString(BEHAVIOR_ON_MALFORMED_DOCS_CONFIG));
+  }
+
+  public BehaviorOnNullValues behaviorOnNullValues() {
+    return BehaviorOnNullValues.forValue(getString(BEHAVIOR_ON_NULL_VALUES_CONFIG));
+  }
+
+  public boolean createIndicesAtStart() {
+    return getBoolean(AUTO_CREATE_INDICES_AT_START_CONFIG);
+  }
+
+  public boolean dropInvalidMessage() {
+    return getBoolean(DROP_INVALID_MESSAGE_CONFIG);
+  }
+
+  public long flushTimeoutMs() {
+    return getLong(FLUSH_TIMEOUT_MS_CONFIG);
+  }
+
+  public boolean ignoreKey() {
+    return getBoolean(KEY_IGNORE_CONFIG);
+  }
+
+  public boolean ignoreSchema() {
+    return getBoolean(SCHEMA_IGNORE_CONFIG);
+  }
+
+  public long lingerMs() {
+    return getLong(LINGER_MS_CONFIG);
+  }
+
+  public int maxBufferedRecords() {
+    return getInt(MAX_BUFFERED_RECORDS_CONFIG);
+  }
+
+  public int maxInFlightRequests() {
+    return getInt(MAX_IN_FLIGHT_REQUESTS_CONFIG);
+  }
+
+  public int maxRetries() {
+    return getInt(MAX_RETRIES_CONFIG);
+  }
+
+  public long retryBackoffMs() {
+    return getLong(RETRY_BACKOFF_MS_CONFIG);
+  }
+
+  public Set<String> topicIgnoreKey() {
+    return new HashSet<>(getList(TOPIC_KEY_IGNORE_CONFIG));
+  }
+
+  public Set<String> topicIgnoreSchema() {
+    return new HashSet<>(getList(TOPIC_SCHEMA_IGNORE_CONFIG));
+  }
+
+  public String type() {
+    return getString(TYPE_NAME_CONFIG);
+  }
+
+  public boolean useCompactMapEntries() {
+    return getBoolean(COMPACT_MAP_ENTRIES_CONFIG);
   }
 
   public static void main(String[] args) {

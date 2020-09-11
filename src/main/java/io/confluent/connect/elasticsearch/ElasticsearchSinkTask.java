@@ -16,7 +16,6 @@
 
 package io.confluent.connect.elasticsearch;
 
-import io.confluent.connect.elasticsearch.bulk.BulkProcessor;
 import io.confluent.connect.elasticsearch.jest.JestElasticsearchClient;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
@@ -59,61 +58,16 @@ public class ElasticsearchSinkTask extends SinkTask {
       log.info("Starting ElasticsearchSinkTask.");
 
       ElasticsearchSinkConnectorConfig config = new ElasticsearchSinkConnectorConfig(props);
-      String type = config.getString(ElasticsearchSinkConnectorConfig.TYPE_NAME_CONFIG);
-      boolean ignoreKey =
-          config.getBoolean(ElasticsearchSinkConnectorConfig.KEY_IGNORE_CONFIG);
-      boolean ignoreSchema =
-          config.getBoolean(ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG);
-      boolean useCompactMapEntries =
-          config.getBoolean(ElasticsearchSinkConnectorConfig.COMPACT_MAP_ENTRIES_CONFIG);
-
-
-      Map<String, String> topicToIndexMap =
-          parseMapConfig(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_INDEX_MAP_CONFIG));
-      Set<String> topicIgnoreKey =
-          new HashSet<>(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_KEY_IGNORE_CONFIG));
-      Set<String> topicIgnoreSchema = new HashSet<>(
-          config.getList(ElasticsearchSinkConnectorConfig.TOPIC_SCHEMA_IGNORE_CONFIG)
-      );
-
-      long flushTimeoutMs =
-          config.getLong(ElasticsearchSinkConnectorConfig.FLUSH_TIMEOUT_MS_CONFIG);
-      int maxBufferedRecords =
-          config.getInt(ElasticsearchSinkConnectorConfig.MAX_BUFFERED_RECORDS_CONFIG);
-      int batchSize =
-          config.getInt(ElasticsearchSinkConnectorConfig.BATCH_SIZE_CONFIG);
-      long lingerMs =
-          config.getLong(ElasticsearchSinkConnectorConfig.LINGER_MS_CONFIG);
-      int maxInFlightRequests =
-          config.getInt(ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG);
-      long retryBackoffMs =
-          config.getLong(ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG);
-      int maxRetry =
-          config.getInt(ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG);
-      boolean dropInvalidMessage =
-          config.getBoolean(ElasticsearchSinkConnectorConfig.DROP_INVALID_MESSAGE_CONFIG);
-      boolean createIndicesAtStartTime =
-          config.getBoolean(ElasticsearchSinkConnectorConfig.AUTO_CREATE_INDICES_AT_START_CONFIG);
-
-      DataConverter.BehaviorOnNullValues behaviorOnNullValues =
-          DataConverter.BehaviorOnNullValues.forValue(
-              config.getString(ElasticsearchSinkConnectorConfig.BEHAVIOR_ON_NULL_VALUES_CONFIG)
-          );
-
-      BulkProcessor.BehaviorOnMalformedDoc behaviorOnMalformedDoc =
-          BulkProcessor.BehaviorOnMalformedDoc.forValue(
-              config.getString(ElasticsearchSinkConnectorConfig.BEHAVIOR_ON_MALFORMED_DOCS_CONFIG)
-          );
 
       // Calculate the maximum possible backoff time ...
       long maxRetryBackoffMs =
-          RetryUtil.computeRetryWaitTimeInMillis(maxRetry, retryBackoffMs);
+          RetryUtil.computeRetryWaitTimeInMillis(config.maxRetries(), config.retryBackoffMs());
       if (maxRetryBackoffMs > RetryUtil.MAX_RETRY_TIME_MS) {
         log.warn("This connector uses exponential backoff with jitter for retries, "
                 + "and using '{}={}' and '{}={}' results in an impractical but possible maximum "
                 + "backoff time greater than {} hours.",
-            ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG, maxRetry,
-            ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG, retryBackoffMs,
+            ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG, config.maxRetries(),
+            ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG, config.retryBackoffMs(),
             TimeUnit.MILLISECONDS.toHours(maxRetryBackoffMs));
       }
 
@@ -123,26 +77,10 @@ public class ElasticsearchSinkTask extends SinkTask {
         this.client = new JestElasticsearchClient(props);
       }
 
-      ElasticsearchWriter.Builder builder = new ElasticsearchWriter.Builder(this.client)
-          .setType(type)
-          .setIgnoreKey(ignoreKey, topicIgnoreKey)
-          .setIgnoreSchema(ignoreSchema, topicIgnoreSchema)
-          .setCompactMapEntries(useCompactMapEntries)
-          .setTopicToIndexMap(topicToIndexMap)
-          .setFlushTimoutMs(flushTimeoutMs)
-          .setMaxBufferedRecords(maxBufferedRecords)
-          .setMaxInFlightRequests(maxInFlightRequests)
-          .setBatchSize(batchSize)
-          .setLingerMs(lingerMs)
-          .setRetryBackoffMs(retryBackoffMs)
-          .setMaxRetry(maxRetry)
-          .setDropInvalidMessage(dropInvalidMessage)
-          .setBehaviorOnNullValues(behaviorOnNullValues)
-          .setBehaviorOnMalformedDoc(behaviorOnMalformedDoc);
-
-      this.createIndicesAtStartTime = createIndicesAtStartTime;
-
-      writer = builder.build();
+      createIndicesAtStartTime = config.createIndicesAtStart();
+      Map<String, String> topicToIndexMap =
+          parseMapConfig(config.getList(ElasticsearchSinkConnectorConfig.TOPIC_INDEX_MAP_CONFIG));
+      writer = new ElasticsearchWriter(client, topicToIndexMap, config);
       writer.start();
     } catch (ConfigException e) {
       throw new ConnectException(
@@ -202,5 +140,4 @@ public class ElasticsearchSinkTask extends SinkTask {
     }
     return map;
   }
-
 }

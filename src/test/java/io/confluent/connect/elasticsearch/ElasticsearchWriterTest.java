@@ -42,7 +42,26 @@ import java.util.Map;
 import java.util.Set;
 
 import static io.confluent.connect.elasticsearch.DataConverter.BehaviorOnNullValues;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.BATCH_SIZE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.BEHAVIOR_ON_NULL_VALUES_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.CONNECTION_URL_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.DROP_INVALID_MESSAGE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.FLUSH_TIMEOUT_MS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.KEY_IGNORE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.LINGER_MS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_BUFFERED_RECORDS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_IN_FLIGHT_REQUESTS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.MAX_RETRIES_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.RETRY_BACKOFF_MS_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.SCHEMA_IGNORE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.TOPIC_KEY_IGNORE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.TOPIC_SCHEMA_IGNORE_CONFIG;
+import static io.confluent.connect.elasticsearch.ElasticsearchSinkConnectorConfig.TYPE_NAME_CONFIG;
+import static java.time.zone.ZoneRulesProvider.refresh;
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.fail;
 
 @ThreadLeakScope(ThreadLeakScope.Scope.NONE)
 public class ElasticsearchWriterTest extends ElasticsearchSinkTestBase {
@@ -527,21 +546,29 @@ public class ElasticsearchWriterTest extends ElasticsearchSinkTestBase {
       boolean dropInvalidMessage,
       BehaviorOnNullValues behavior
   ) {
-    ElasticsearchWriter writer = new ElasticsearchWriter.Builder(client)
-        .setType(TYPE)
-        .setIgnoreKey(ignoreKey, ignoreKeyTopics)
-        .setIgnoreSchema(ignoreSchema, ignoreSchemaTopics)
-        .setTopicToIndexMap(topicToIndexMap)
-        .setFlushTimoutMs(10000)
-        .setMaxBufferedRecords(10000)
-        .setMaxInFlightRequests(1)
-        .setBatchSize(2)
-        .setLingerMs(1000)
-        .setRetryBackoffMs(1000)
-        .setMaxRetry(3)
-        .setDropInvalidMessage(dropInvalidMessage)
-        .setBehaviorOnNullValues(behavior)
-        .build();
+    Map<String, String> props = new HashMap<>();
+    props.put(KEY_IGNORE_CONFIG, String.valueOf(ignoreKey));
+    props.put(TOPIC_KEY_IGNORE_CONFIG, String.join(",", ignoreKeyTopics));
+    props.put(TYPE_NAME_CONFIG, TYPE);
+    props.put(SCHEMA_IGNORE_CONFIG, String.valueOf(ignoreSchema));
+    props.put(TOPIC_SCHEMA_IGNORE_CONFIG, String.join(",", ignoreSchemaTopics));
+    props.put(FLUSH_TIMEOUT_MS_CONFIG, "10000");
+    props.put(MAX_BUFFERED_RECORDS_CONFIG, "10000");
+    props.put(MAX_IN_FLIGHT_REQUESTS_CONFIG, "1");
+    props.put(BATCH_SIZE_CONFIG, "2");
+    props.put(LINGER_MS_CONFIG, "1000");
+    props.put(MAX_RETRIES_CONFIG, "3");
+    props.put(DROP_INVALID_MESSAGE_CONFIG, String.valueOf(dropInvalidMessage));
+    props.put(RETRY_BACKOFF_MS_CONFIG, "1000");
+    props.put(BEHAVIOR_ON_NULL_VALUES_CONFIG, behavior.name());
+    props.put(CONNECTION_URL_CONFIG, "dummy");
+
+    ElasticsearchWriter writer = new ElasticsearchWriter(
+        client,
+        topicToIndexMap,
+        new ElasticsearchSinkConnectorConfig(props)
+    );
+
     writer.start();
     writer.createIndicesForTopics(Collections.singleton(TOPIC));
     return writer;

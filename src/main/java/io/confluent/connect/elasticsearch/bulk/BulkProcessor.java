@@ -54,12 +54,7 @@ public class BulkProcessor<R, B> {
 
   private final Time time;
   private final BulkClient<R, B> bulkClient;
-  private final int maxBufferedRecords;
-  private final int batchSize;
-  private final long lingerMs;
-  private final int maxRetries;
-  private final long retryBackoffMs;
-  private final BehaviorOnMalformedDoc behaviorOnMalformedDoc;
+  private final ElasticsearchSinkConnectorConfig config;
 
   private final Thread farmer;
   private final ExecutorService executor;
@@ -78,28 +73,17 @@ public class BulkProcessor<R, B> {
   public BulkProcessor(
       Time time,
       BulkClient<R, B> bulkClient,
-      int maxBufferedRecords,
-      int maxInFlightRequests,
-      int batchSize,
-      long lingerMs,
-      int maxRetries,
-      long retryBackoffMs,
-      BehaviorOnMalformedDoc behaviorOnMalformedDoc
+      ElasticsearchSinkConnectorConfig config
   ) {
     this.time = time;
     this.bulkClient = bulkClient;
-    this.maxBufferedRecords = maxBufferedRecords;
-    this.batchSize = batchSize;
-    this.lingerMs = lingerMs;
-    this.maxRetries = maxRetries;
-    this.retryBackoffMs = retryBackoffMs;
-    this.behaviorOnMalformedDoc = behaviorOnMalformedDoc;
+    this.config = config;
 
-    unsentRecords = new ArrayDeque<>(maxBufferedRecords);
+    unsentRecords = new ArrayDeque<>(config.maxBufferedRecords());
 
     final ThreadFactory threadFactory = makeThreadFactory();
     farmer = threadFactory.newThread(farmerTask());
-    executor = Executors.newFixedThreadPool(maxInFlightRequests, threadFactory);
+    executor = Executors.newFixedThreadPool(config.maxInFlightRequests(), threadFactory);
   }
 
   private ThreadFactory makeThreadFactory() {
@@ -164,7 +148,7 @@ public class BulkProcessor<R, B> {
          elapsedMs = time.milliseconds() - waitStartTimeMs) {
       // when linger time has already elapsed, we still have to ensure the other submission
       // conditions hence the wait(0) in that case
-      wait(Math.max(0, lingerMs - elapsedMs));
+      wait(Math.max(0, config.lingerMs() - elapsedMs));
     }
     // at this point, either stopRequested or canSubmit
     return stopRequested
@@ -175,7 +159,7 @@ public class BulkProcessor<R, B> {
 
   private synchronized Future<BulkResponse> submitBatch() {
     assert !unsentRecords.isEmpty();
-    final int batchableSize = Math.min(batchSize, unsentRecords.size());
+    final int batchableSize = Math.min(config.batchSize(), unsentRecords.size());
     final List<R> batch = new ArrayList<>(batchableSize);
     for (int i = 0; i < batchableSize; i++) {
       batch.add(unsentRecords.removeFirst());
@@ -194,7 +178,8 @@ public class BulkProcessor<R, B> {
    */
   private synchronized boolean canSubmit(long elapsedMs) {
     return !unsentRecords.isEmpty()
-           && (flushRequested || elapsedMs >= lingerMs || unsentRecords.size() >= batchSize);
+           && (flushRequested || elapsedMs >= config.lingerMs()
+        || unsentRecords.size() >= config.batchSize());
   }
 
   /**
@@ -296,10 +281,11 @@ public class BulkProcessor<R, B> {
   public synchronized void add(R record, long timeoutMs) {
     throwIfTerminal();
 
-    if (bufferedRecords() >= maxBufferedRecords) {
+    if (bufferedRecords() >= config.maxBufferedRecords()) {
       final long addStartTimeMs = time.milliseconds();
       for (long elapsedMs = time.milliseconds() - addStartTimeMs;
-           !isTerminal() && elapsedMs < timeoutMs && bufferedRecords() >= maxBufferedRecords;
+           !isTerminal() && elapsedMs < timeoutMs
+               && bufferedRecords() >= config.maxBufferedRecords();
            elapsedMs = time.milliseconds() - addStartTimeMs) {
         try {
           wait(timeoutMs - elapsedMs);
@@ -308,7 +294,7 @@ public class BulkProcessor<R, B> {
         }
       }
       throwIfTerminal();
-      if (bufferedRecords() >= maxBufferedRecords) {
+      if (bufferedRecords() >= config.maxBufferedRecords()) {
         throw new ConnectException("Add timeout expired before buffer availability");
       }
     }
@@ -385,7 +371,7 @@ public class BulkProcessor<R, B> {
         );
         throw e;
       }
-      final int maxAttempts = maxRetries + 1;
+      final int maxAttempts = config.maxRetries() + 1;
       for (int attempts = 1, retryAttempts = 0; true; ++attempts, ++retryAttempts) {
         boolean retriable = true;
         try {
@@ -411,7 +397,7 @@ public class BulkProcessor<R, B> {
         } catch (Exception e) {
           if (retriable && attempts < maxAttempts) {
             long sleepTimeMs = RetryUtil.computeRandomRetryWaitTimeInMillis(retryAttempts,
-                    retryBackoffMs);
+                    config.retryBackoffMs());
             log.warn("Failed to execute batch {} of {} records with attempt {}/{}, "
                       + "will attempt retry after {} ms. Failure reason: {}",
                       batchId, batch.size(), attempts, maxAttempts, sleepTimeMs, e.getMessage());
@@ -434,7 +420,7 @@ public class BulkProcessor<R, B> {
     private void handleMalformedDoc(BulkResponse bulkRsp) {
       // if the elasticsearch request failed because of a malformed document,
       // the behavior is configurable.
-      switch (behaviorOnMalformedDoc) {
+      switch (config.behaviorOnMalformedDoc()) {
         case IGNORE:
           log.debug("Encountered an illegal document error when executing batch {} of {}"
                   + " records. Ignoring and will not index record. Error was {}",
@@ -458,7 +444,7 @@ public class BulkProcessor<R, B> {
           throw new RuntimeException(String.format(
               "Unknown value for %s enum: %s",
               BehaviorOnMalformedDoc.class.getSimpleName(),
-              behaviorOnMalformedDoc
+              config.behaviorOnMalformedDoc()
           ));
       }
     }
